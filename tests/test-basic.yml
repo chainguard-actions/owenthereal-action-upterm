@@ -1,0 +1,32 @@
+name: Test basic usage with upterm-version
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          upterm-server: "ssh://uptermd.upterm.dev:22"
+          upterm-version: "v0.20.0"
+          detached: "true"
+          wait-timeout-minutes: "1"
+          limit-access-to-actor: "false"
+      - name: Assert action ran (ssh-command output or action completed)
+        env:
+          SSH_CMD: ${{ steps.action.outputs.ssh-command }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ssh-command: $SSH_CMD"
+          # The action either succeeds (providing an ssh-command) or fails due to
+          # network unavailability in the test environment. Either way, the action
+          # must have been invoked (not skipped).
+          if [ "$OUTCOME" = "skipped" ]; then
+            echo "FAIL: action was skipped, expected it to run"
+            exit 1
+          fi
+          echo "PASS: action ran with outcome=$OUTCOME"

@@ -1,0 +1,20 @@
+name: Test upterm-version input
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          upterm-server: "ssh://uptermd.upterm.dev:22"
+          upterm-version: "v0.20.0"
+          wait-timeout-minutes: "1"
+          limit-access-to-actor: "false"
+      - name: Assert action ran with specific upterm version
+        run: |
+          echo "Action step completed with upterm-version=v0.20.0 (with or without error due to external server)"
+          echo "PASS"

@@ -9,6 +9,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
 | v1.12.0 | [`v1.12.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v1.12.0) | [`de23d09`](https://github.com/owenthereal/action-upterm/commit/de23d094ff41be3a09894c4e2b8dd74378013f2e) |
+| v1.13.0 | [`v1.13.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v1.13.0) | [`74d5d8b`](https://github.com/owenthereal/action-upterm/commit/74d5d8bd3d4289468cdfc077df22adb884020f06) |
 
 ## Privacy
 

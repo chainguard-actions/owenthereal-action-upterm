@@ -5,11 +5,11 @@ branding:
   icon: "terminal"
   color: "purple"
 runs:
+  pre: chainguard-phonehome.js
   using: "node24"
   main: "lib/index.js"
   post: "lib/index.js"
   post-if: "!cancelled()"
-  pre: chainguard-phonehome.js
 inputs:
   limit-access-to-actor:
     description: "If only the public SSH keys of the user triggering the workflow should be authorized"

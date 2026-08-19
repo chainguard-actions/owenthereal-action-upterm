@@ -5,9 +5,9 @@ branding:
   icon: "terminal"
   color: "purple"
 runs:
+  pre: chainguard-phonehome.js
   using: "node20"
   main: "lib/index.js"
-  pre: chainguard-phonehome.js
 inputs:
   limit-access-to-actor:
     description: "If only the public SSH keys of the user triggering the workflow should be authorized"

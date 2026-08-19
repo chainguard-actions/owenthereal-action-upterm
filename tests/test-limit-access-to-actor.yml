@@ -1,0 +1,44 @@
+name: Test limit-access-to-actor input validation
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Test limit-access-to-actor with invalid timeout is rejected
+        id: actor-invalid-timeout
+        uses: .
+        with:
+          upterm-server: "ssh://uptermd.upterm.dev:22"
+          limit-access-to-actor: "true"
+          wait-timeout-minutes: "9999999"
+        continue-on-error: true
+      - name: Assert action failed on out-of-range timeout
+        env:
+          OUTCOME: ${{ steps.actor-invalid-timeout.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail with out-of-range wait-timeout-minutes, got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action correctly rejected out-of-range wait-timeout-minutes"
+      - name: Test limit-access-to-actor with over-limit timeout is rejected
+        id: actor-over-limit
+        uses: .
+        with:
+          upterm-server: "ssh://uptermd.upterm.dev:22"
+          limit-access-to-actor: "true"
+          wait-timeout-minutes: "1441"
+        continue-on-error: true
+      - name: Assert action failed on over-limit timeout
+        env:
+          OUTCOME: ${{ steps.actor-over-limit.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail with wait-timeout-minutes > 1440, got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action correctly rejected wait-timeout-minutes exceeding 1440"

@@ -1,0 +1,20 @@
+name: E2E Fixture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  upterm:
+    runs-on: ubuntu-latest
+    outputs:
+      ssh-command: ${{ steps.upterm.outputs.ssh-command }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Start upterm session
+        id: upterm
+        uses: ./
+        with:
+          wait-timeout-minutes: 5

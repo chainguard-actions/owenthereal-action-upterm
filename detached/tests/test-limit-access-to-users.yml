@@ -1,4 +1,4 @@
-name: Test basic detached mode
+name: Test limit access to specific users
 on:
   workflow_dispatch:
 jobs:
@@ -12,8 +12,9 @@ jobs:
         with:
           upterm-server: "ssh://uptermd.upterm.dev:22"
           detached: "true"
+          limit-access-to-users: "owenthereal"
           wait-timeout-minutes: "1"
-      - name: Assert action ran and produced output or failed gracefully
+      - name: Assert action ran with user restriction or failed gracefully
         env:
           OUTCOME: ${{ steps.action.outcome }}
           SSH_CMD: ${{ steps.action.outputs.ssh-command }}

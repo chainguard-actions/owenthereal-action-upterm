@@ -2,6 +2,7 @@
   "owner": "owenthereal",
   "repo": "action-upterm",
   "version": "v1.15.0",
+  "path": "detached",
   "commit_sha": "47652056242288ccbebd30f836e9885d09a75365",
   "url": "https://github.com/owenthereal/action-upterm",
   "policy_sha": "d636be7e43ef829af6e853da6b3c7566db9f72fe",

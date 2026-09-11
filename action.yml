@@ -5,7 +5,6 @@ branding:
   icon: "terminal"
   color: "purple"
 runs:
-  pre: chainguard-phonehome.js
   using: "node20"
   main: "lib/index.js"
 inputs:

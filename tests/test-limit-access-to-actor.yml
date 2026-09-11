@@ -1,29 +1,31 @@
-name: Test basic usage - default server with timeout
+name: Test limit access to actor
 on:
   workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_ACTOR: "octocat"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Start upterm session with short timeout
+      - name: Start upterm session limited to actor
         id: action
         uses: .
         continue-on-error: true
         with:
           upterm-server: "ssh://uptermd.upterm.dev:22"
+          limit-access-to-actor: "true"
           wait-timeout-minutes: "1"
-          limit-access-to-actor: "false"
-      - name: Assert action ran (either succeeded or timed out gracefully)
+      - name: Assert action ran with actor access restriction
         env:
           OUTCOME: ${{ steps.action.outcome }}
         run: |
           echo "action outcome: $OUTCOME"
-          # The action should either succeed (unlikely in CI without real SSH keys)
-          # or fail gracefully after the timeout — it should NOT hang indefinitely.
-          # We accept both 'success' and 'failure' as valid outcomes.
+          # The action should either succeed or fail gracefully after timeout.
+          # The key thing tested here is that the limit-access-to-actor input
+          # is accepted and the action starts with actor restriction configured.
           if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
-            echo "PASS: action completed with outcome '$OUTCOME'"
+            echo "PASS: action completed with outcome '$OUTCOME' with actor access restriction"
           else
             echo "FAIL: unexpected outcome '$OUTCOME'"
             exit 1

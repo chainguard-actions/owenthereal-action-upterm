@@ -1,6 +1,6 @@
 <!-- markdownlint-disable -->
 
-# Hardening Report: owenthereal--action-upterm/v1.14.0
+# Hardening Report: owenthereal--action-upterm--detached/v1.14.0
 
 > This file was generated automatically by the hardening agent.
 
@@ -10,5 +10,5 @@
 
 **Harden Agent Version:** `2`
 
-Action **owenthereal--action-upterm/v1.14.0** was hardened automatically. 0 finding(s) were identified and resolved across 0 iteration(s).
+Action **owenthereal--action-upterm--detached/v1.14.0** was hardened automatically. 0 finding(s) were identified and resolved across 0 iteration(s).
 

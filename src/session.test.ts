@@ -1,0 +1,263 @@
+import {getSession, isTerminal, parseSessionInfo, generateSessionName, parseUptermVersion, isUptermVersionSupported, hasGuestJoined, formatVersion, waitStatusLine} from './session';
+import {execShellCommand, ShellCommandError} from './helpers';
+
+jest.mock('./helpers', () => ({
+  ...jest.requireActual('./helpers'),
+  execShellCommand: jest.fn()
+}));
+
+const mockedExec = execShellCommand as jest.MockedFunction<typeof execShellCommand>;
+
+const READY_WITH_DETAIL = JSON.stringify({
+  name: 'gha-3f9a1c05',
+  status: 'ready',
+  sessionId: 'sess-1',
+  adminSocket: '/tmp/r/upterm/sessions/gha-3f9a1c05/admin.sock',
+  logPath: '/tmp/b/state/upterm/upterm.log',
+  sshCommand: 'ssh token@uptermd.upterm.dev',
+  clientCount: 1,
+  guestCount: 0
+});
+
+// lookup() returns the record's view with status still "ready" when the admin
+// query fails or the session ID moved (cmd/upterm/command/session.go:485-488).
+// clientCount and guestCount are declared without `omitempty` (session.go:395,400),
+// so upterm sends them as 0 even here - the zero is an artifact of the struct,
+// not a count of anybody.
+const READY_WITHOUT_DETAIL = JSON.stringify({
+  name: 'gha-3f9a1c05',
+  status: 'ready',
+  sessionId: 'sess-1',
+  logPath: '/tmp/b/state/upterm/upterm.log',
+  clientCount: 0,
+  guestCount: 0
+});
+
+const ENDED_AFTER_SIGKILL = JSON.stringify({
+  name: 'gha-3f9a1c05',
+  status: 'ended',
+  reason: 'unknown',
+  signal: 'SIGKILL',
+  clientCount: 0,
+  guestCount: 0
+});
+
+describe('parseSessionInfo', () => {
+  it('marks a ready session with an ssh command as having live detail', () => {
+    const info = parseSessionInfo(READY_WITH_DETAIL);
+    expect(info.status).toBe('ready');
+    expect(info.hasLiveDetail).toBe(true);
+    expect(info.sshCommand).toBe('ssh token@uptermd.upterm.dev');
+    expect(info.guestCount).toBe(0);
+  });
+
+  it('marks a ready session without an ssh command as lacking live detail', () => {
+    const info = parseSessionInfo(READY_WITHOUT_DETAIL);
+    expect(info.status).toBe('ready');
+    expect(info.hasLiveDetail).toBe(false);
+    expect(info.sshCommand).toBeUndefined();
+    // guestCount is PRESENT and zero - upterm always sends it. That zero means
+    // UNKNOWN, not "nobody connected": hasLiveDetail is the only thing callers
+    // may gate on. Reading this 0 as a real count would shut down a session
+    // someone is actively attached to.
+    expect(info.guestCount).toBe(0);
+  });
+
+  it('parses an ended session that crashed', () => {
+    const info = parseSessionInfo(ENDED_AFTER_SIGKILL);
+    expect(info.status).toBe('ended');
+    expect(info.signal).toBe('SIGKILL');
+    expect(info.hasLiveDetail).toBe(false);
+  });
+
+  it('tolerates output printed around the JSON', () => {
+    // execShellCommand resolves with everything on stdout. On Windows the
+    // `bash -lc` login shell re-sources /etc/profile, whose output lands in
+    // front of the JSON; upterm can print notices too.
+    const info = parseSessionInfo(`/etc/profile: sourcing /etc/profile.d/msys2.sh\n${READY_WITH_DETAIL}\n`);
+    expect(info.status).toBe('ready');
+    expect(info.hasLiveDetail).toBe(true);
+    expect(info.sshCommand).toBe('ssh token@uptermd.upterm.dev');
+  });
+
+  it('names the problem and quotes the output when there is no JSON at all', () => {
+    // A bare SyntaxError here gets swallowed into 'unknown' by the poll loop or
+    // burns every readiness retry, with nothing in the log to explain it.
+    expect(() => parseSessionInfo('bash: upterm: command not found\n')).toThrow(/Could not parse upterm session info output/);
+    expect(() => parseSessionInfo('bash: upterm: command not found\n')).toThrow(/bash: upterm: command not found/);
+  });
+
+  it('names the problem and quotes the output when the JSON is malformed', () => {
+    expect(() => parseSessionInfo('{"name": "gha-3f9a1c05", }')).toThrow(/Could not parse upterm session info output/);
+    expect(() => parseSessionInfo('{"name": "gha-3f9a1c05", }')).toThrow(/"name": "gha-3f9a1c05"/);
+  });
+});
+
+describe('isTerminal', () => {
+  it('treats ended, ending and disconnected as terminal', () => {
+    expect(isTerminal('ended')).toBe(true);
+    expect(isTerminal('ending')).toBe(true);
+    expect(isTerminal('disconnected')).toBe(true);
+  });
+
+  it('does not treat starting or ready as terminal', () => {
+    expect(isTerminal('starting')).toBe(false);
+    expect(isTerminal('ready')).toBe(false);
+  });
+});
+
+describe('getSession', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns parsed info for a live session', async () => {
+    mockedExec.mockResolvedValue(READY_WITH_DETAIL);
+    const info = await getSession('gha-3f9a1c05');
+    expect(info?.status).toBe('ready');
+    // Quiet: this runs every few seconds in the monitor and post loops, and its
+    // JSON would otherwise be dumped into the job log each time.
+    expect(mockedExec).toHaveBeenCalledWith("upterm session info 'gha-3f9a1c05' -o json", {quiet: true});
+  });
+
+  it('returns null when upterm says no session has the name (exit 4)', async () => {
+    mockedExec.mockRejectedValue(new ShellCommandError('Command failed with exit code 4: upterm session info gha-3f9a1c05 -o json\nStderr: no session named "gha-3f9a1c05"', 4));
+    await expect(getSession('gha-3f9a1c05')).resolves.toBeNull();
+  });
+
+  it('does not read "no session named" text on another exit code as not-found', async () => {
+    // Only the exit code is upterm's contract; text can appear in any failure.
+    mockedExec.mockRejectedValue(new ShellCommandError('Command failed with exit code 1\nStderr: no session named "gha-3f9a1c05"', 1));
+    await expect(getSession('gha-3f9a1c05')).rejects.toThrow('no session named');
+  });
+
+  it('propagates any other failure instead of reporting not-found', async () => {
+    mockedExec.mockRejectedValue(new Error('Command failed with exit code 127\nStderr: upterm: command not found'));
+    await expect(getSession('gha-3f9a1c05')).rejects.toThrow('command not found');
+  });
+});
+
+describe('generateSessionName', () => {
+  it('produces a short name upterm accepts', () => {
+    const name = generateSessionName();
+    // upterm's nameRe: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
+    expect(name).toMatch(/^gha-[0-9a-f]{8}$/);
+    expect(name).toHaveLength(12);
+  });
+
+  it('produces a different name each time', () => {
+    expect(generateSessionName()).not.toBe(generateSessionName());
+  });
+});
+
+describe('parseUptermVersion', () => {
+  it('parses the first line of `upterm version`', () => {
+    expect(parseUptermVersion('Upterm version v0.30.0\nGit commit: abc\n')).toEqual({major: 0, minor: 30, patch: 0});
+  });
+
+  it('parses a version without a leading v', () => {
+    expect(parseUptermVersion('Upterm version 0.31.2')).toEqual({major: 0, minor: 31, patch: 2});
+  });
+
+  it('returns null for an unrecognized string', () => {
+    expect(parseUptermVersion('Upterm version dev')).toBeNull();
+    expect(parseUptermVersion('')).toBeNull();
+  });
+});
+
+describe('hasGuestJoined', () => {
+  it('is true once upterm has published firstGuestJoinedAt', () => {
+    const s = parseSessionInfo(JSON.stringify({name: 'gha-1', status: 'ready', firstGuestJoinedAt: '2026-09-23T04:12:15.3725867Z'}));
+    expect(hasGuestJoined(s)).toBe(true);
+  });
+
+  it('is false when the field is absent, whatever guestCount says', () => {
+    // guestCount counts forwarding-only presence, which does not qualify, and
+    // is a current count; only the published timestamp answers "ever joined".
+    const s = parseSessionInfo(JSON.stringify({name: 'gha-1', status: 'ready', sshCommand: 'ssh x@y', guestCount: 1}));
+    expect(hasGuestJoined(s)).toBe(false);
+  });
+
+  it('is false for an empty string', () => {
+    const s = parseSessionInfo(JSON.stringify({name: 'gha-1', status: 'ready', firstGuestJoinedAt: ''}));
+    expect(hasGuestJoined(s)).toBe(false);
+  });
+
+  it('holds for an ended session, read from the record', () => {
+    const s = parseSessionInfo(JSON.stringify({name: 'gha-1', status: 'ended', reason: 'stopped', firstGuestJoinedAt: '2026-09-23T04:12:15Z'}));
+    expect(hasGuestJoined(s)).toBe(true);
+  });
+});
+
+describe('formatVersion', () => {
+  it('renders a v-prefixed triple', () => {
+    expect(formatVersion({major: 0, minor: 31, patch: 0})).toBe('v0.31.0');
+  });
+});
+
+describe('isUptermVersionSupported', () => {
+  it('accepts 0.32.0 and newer', () => {
+    expect(isUptermVersionSupported({major: 0, minor: 32, patch: 0})).toBe(true);
+    expect(isUptermVersionSupported({major: 0, minor: 32, patch: 4})).toBe(true);
+    expect(isUptermVersionSupported({major: 0, minor: 33, patch: 0})).toBe(true);
+    expect(isUptermVersionSupported({major: 1, minor: 0, patch: 0})).toBe(true);
+  });
+
+  it('rejects 0.31.x and older, which cannot take a join timeout after launch', () => {
+    expect(isUptermVersionSupported({major: 0, minor: 31, patch: 9})).toBe(false);
+    expect(isUptermVersionSupported({major: 0, minor: 31, patch: 0})).toBe(false);
+    expect(isUptermVersionSupported({major: 0, minor: 30, patch: 0})).toBe(false);
+  });
+});
+
+describe('waitStatusLine', () => {
+  const NOW = Date.parse('2026-09-26T10:00:00Z');
+  const live = (fields: Record<string, unknown>) => parseSessionInfo(JSON.stringify({name: 'gha-1', status: 'ready', sshCommand: 'ssh x@y', ...fields}));
+  const UNCONFIRMED = 'unconfirmed: upterm answered from its record';
+
+  it('counts down to a deadline the daemon confirms, rounding up', () => {
+    const s = live({joinStateSource: 'daemon', joinTimeout: '1m', joinDeadline: '2026-09-26T10:00:42.300Z'});
+    expect(waitStatusLine(s, false, NOW)).toBe('Waiting for client to connect (at most 43 more second(s))');
+  });
+
+  it('handles a nanosecond-precision deadline, as upterm writes RFC 3339 with up to 9 fractional digits', () => {
+    const s = live({joinStateSource: 'daemon', joinTimeout: '1m', joinDeadline: '2026-09-26T10:00:42.123456789Z'});
+    expect(waitStatusLine(s, false, NOW)).toBe('Waiting for client to connect (at most 43 more second(s))');
+  });
+
+  it('shows 0, never a negative count, once the deadline has passed', () => {
+    // Teardown after the deadline fires can still show it for ~16 s.
+    const s = live({joinStateSource: 'daemon', joinTimeout: '1m', joinDeadline: '2026-09-26T09:59:44Z'});
+    expect(waitStatusLine(s, false, NOW)).toBe('Waiting for client to connect (at most 0 more second(s))');
+  });
+
+  it('waits for the end when the daemon confirms there is no deadline', () => {
+    expect(waitStatusLine(live({joinStateSource: 'daemon'}), false, NOW)).toBe('Waiting for session to end');
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['record', {joinStateSource: 'record'}],
+    ['absent', {}]
+  ])('labels a deadline as unconfirmed when joinStateSource is %s', (_source, fields) => {
+    const s = live({...fields, joinTimeout: '1m', joinDeadline: '2026-09-26T10:00:30Z'});
+    expect(waitStatusLine(s, false, NOW)).toBe(`Waiting for client to connect (at most 30 more second(s), ${UNCONFIRMED})`);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['record', {joinStateSource: 'record'}],
+    ['absent', {}]
+  ])('does not claim there is no window when joinStateSource is %s and there is no deadline', (_source, fields) => {
+    expect(waitStatusLine(live(fields), false, NOW)).toBe(`Waiting for session to end (join timeout ${UNCONFIRMED})`);
+  });
+
+  it('always waits for the end once a join has been seen, whatever this response says', () => {
+    // The first join claims the session for good; a stale response must not bring the countdown back.
+    expect(waitStatusLine(live({joinStateSource: 'daemon', joinTimeout: '1m', joinDeadline: '2026-09-26T10:00:30Z'}), true, NOW)).toBe('Waiting for session to end');
+    expect(waitStatusLine(live({joinStateSource: 'record', joinDeadline: '2026-09-26T10:00:30Z'}), true, NOW)).toBe('Waiting for session to end');
+    expect(waitStatusLine(live({}), true, NOW)).toBe('Waiting for session to end');
+  });
+
+  it('treats an unparseable deadline as no deadline, never printing NaN', () => {
+    const line = waitStatusLine(live({joinStateSource: 'daemon', joinDeadline: 'soon'}), false, NOW);
+    expect(line).toBe('Waiting for session to end');
+    expect(line).not.toContain('NaN');
+  });
+});

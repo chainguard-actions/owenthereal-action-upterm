@@ -1,0 +1,116 @@
+import * as core from '@actions/core';
+import {spawn} from 'child_process';
+
+export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * A shell command that did not exit 0.
+ *
+ * The message is the one execShellCommand has always rejected with. exitCode
+ * lets a caller act on a documented exit status - upterm's 4, "no session has
+ * this name" - instead of matching stderr text. null when the process was
+ * ended by a signal rather than exiting.
+ */
+export class ShellCommandError extends Error {
+  constructor(
+    message: string,
+    readonly exitCode: number | null
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Executes a shell command and returns the output as a Promise.
+ *
+ * @param cmd - The shell command to execute
+ * @param options.quiet - Send the command's output to core.debug instead of the
+ *   job log. For commands polled on a timer, whose output would otherwise fill
+ *   the log. Only where the output goes changes: stdout is still returned, and
+ *   stderr is still included in the rejection.
+ * @returns Promise that resolves with the command's stdout output
+ * @throws ShellCommandError if the command exits non-zero; Error if cmd is empty or cannot be spawned
+ */
+export function execShellCommand(cmd: string, options: {quiet?: boolean} = {}): Promise<string> {
+  core.debug(`Executing shell command: [${cmd}]`);
+
+  if (!cmd.trim()) {
+    return Promise.reject(new Error('Command cannot be empty'));
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    // Every command this wrapper runs is non-interactive. Without an explicit
+    // stdio, Node gives the child an open stdin pipe that nothing ever writes
+    // to or closes - harmless for a command that never reads it, but
+    // `upterm host --known-hosts` prompts for confirmation on an unrecognized
+    // host key (promptForConfirmation, blocking on bufio.Reader.ReadString)
+    // and would hang on that open pipe forever instead of failing fast.
+    // Ignoring stdin makes it read EOF immediately, so a wrong or missing pin
+    // is a prompt upterm itself refuses at once - "no answer from the
+    // terminal: stdin: EOF" - rather than a job that runs until the
+    // workflow-level timeout.
+    const proc =
+      process.platform !== 'win32'
+        ? spawn(cmd, [], {shell: 'bash', stdio: ['ignore', 'pipe', 'pipe']})
+        : spawn('C:\\msys64\\usr\\bin\\bash.exe', ['-lc', cmd], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: {
+              ...process.env,
+              MSYS2_PATH_TYPE: 'inherit' /* Inherit previous path */,
+              CHERE_INVOKING: '1' /* do not `cd` to home */,
+              MSYSTEM: 'MINGW64' /* include the MINGW programs in C:/msys64/mingw64/bin/ */
+            }
+          });
+    let stdout = '';
+    let stderr = '';
+    const logStdout = options.quiet ? core.debug : console.log;
+    const logStderr = options.quiet ? core.debug : console.error;
+
+    proc.stdout.on('data', data => {
+      const output = data.toString();
+      logStdout(output);
+      stdout += output;
+    });
+
+    proc.stderr.on('data', data => {
+      const output = data.toString();
+      logStderr(output);
+      stderr += output;
+    });
+
+    proc.on('exit', code => {
+      if (code !== 0) {
+        const errorMsg = `Command failed with exit code ${code}: ${cmd}`;
+        const fullError = stderr ? `${errorMsg}\nStderr: ${stderr}` : errorMsg;
+        reject(new ShellCommandError(fullError, code));
+        return;
+      }
+      resolve(stdout);
+    });
+
+    proc.on('error', error => {
+      reject(new Error(`Process error: ${error.message}`));
+    });
+  });
+}
+
+/**
+ * Escape a string for safe use in single-quoted shell arguments.
+ * Handles paths that may contain single quotes by using the '\'' escape pattern.
+ *
+ * Use this for:
+ * - User-provided strings (server URLs, GitHub usernames)
+ * - File paths in shell commands
+ * - Any value passed through nested command layers
+ *
+ * @example
+ * shellEscape("hello world")           // => "'hello world'"
+ * shellEscape("user's file")           // => "'user'\''s file'"
+ * shellEscape("ssh://server:22")       // => "'ssh://server:22'"
+ *
+ * @param value - The string to escape
+ * @returns Single-quoted string safe for shell use
+ */
+export function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}

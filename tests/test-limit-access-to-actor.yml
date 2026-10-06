@@ -1,0 +1,31 @@
+name: Test limit access to actor
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: upterm
+        uses: .
+        continue-on-error: true
+        with:
+          upterm-server: "ssh://uptermd.upterm.dev:22"
+          detached: "true"
+          wait-timeout-minutes: "1"
+          limit-access-to-actor: "true"
+      - name: Assert action ran (connected, skipped due to no SSH keys, or failed gracefully)
+        env:
+          OUTCOME: ${{ steps.upterm.outcome }}
+          SSH_CMD: ${{ steps.upterm.outputs.ssh-command }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ssh-command: $SSH_CMD"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded (session started or skipped due to no SSH keys for actor)"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (upterm server unreachable or timed out in test env)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

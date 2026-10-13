@@ -19,6 +19,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v2.4.0 | [`v2.4.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v2.4.0) | [`7df5fa5`](https://github.com/owenthereal/action-upterm/commit/7df5fa550d6dc458335f4b2685452a0e42d0ba7e) |
 | v2.5.0 | [`v2.5.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v2.5.0) | [`4d9cc09`](https://github.com/owenthereal/action-upterm/commit/4d9cc09ee511b59cd5fd26a4dc3e7552665fa51f) |
 | v2.6.0 | [`v2.6.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v2.6.0) | [`175d337`](https://github.com/owenthereal/action-upterm/commit/175d33786004a53b1538bcf157402b7197ce5029) |
+| v2.7.0 | [`v2.7.0`](https://github.com/chainguard-actions/owenthereal-action-upterm/tree/v2.7.0) | [`b9dfa52`](https://github.com/owenthereal/action-upterm/commit/b9dfa526f890bbd5162d781f8d9c69b97731d73d) |
 
 ## Privacy
 
